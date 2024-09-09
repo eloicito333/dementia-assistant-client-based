@@ -1,6 +1,8 @@
 from openai_client import OPENAI_CLIENT
 from essential_data import ASSISTANT_NAME, USER_NAME, IMPORTANT_WORDS
 
+from  program_settings import verbose
+
 class Transcriber:
 
     def __init__(self, model="whisper-1", response_format="json"):
@@ -23,7 +25,7 @@ S'han de seguir les següents instruccions rigorosament per fer aquesta feina:
 Aquest símbol ("|") es troba on l'àudio s'ha tallat per ser transcrit. L'inici i el final d'aquestes cadenes és el mateix, així que s'han de realitzar retocs per ajuntar ambdues seqüències."""
 
     def _correct_transcript(self, system_prompt, transcript, temperature=.5):
-        print(transcript)
+        if verbose: print(transcript)
         response = self.client.chat.completions.create(
             model="gpt-4o-mini",
             temperature=temperature,

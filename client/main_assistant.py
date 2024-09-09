@@ -8,6 +8,8 @@ from function_calling.function_handler import FunctionHandler
 from api_helper import api_helper
 from threading import Thread
 
+from  program_settings import verbose
+
 class ContextWindow:
     def __init__(self, max_tokens=100_000):
         self.max_tokens = max_tokens
@@ -25,7 +27,6 @@ class ContextWindow:
         if(not usage):
             usage = self._estimate_usage(message["content"])
         
-        print("message role: ", get_subscriptable(message, "role"), message)
         if get_subscriptable(message, "role") == "system":
             if(self.system_message): self.current_usage_tokens -= self.system_message["usage"]
             self.system_message = {
@@ -82,7 +83,8 @@ class MainAssistant:
             "normal": f"""Ets en {self.name}, un assistent de veu disenyat per ajudar i millorar l'autonomia de les persones amb demència. Ets calmat, relaxat, i actues amb paciència.
 {transcriber_utils.get_name_with_article(USER_NAME, USER_GENDER)[0].upper() + transcriber_utils.get_name_with_article(USER_NAME, USER_GENDER)[1:]} és el/la teu pacient. El seu gènere és {USER_GENDER}.
 La teva funció és ajudar-lo en tot el que li faci falta, sent conscient que molts cops oblidarà el que s'ha parlat.
-Les teves respostes han de ser donades a partir de l'informació que tens a l'abast (dins d'aquest context). Si necessites informació fora d'aquest context, pots utilitzar les eines que tens al teu abast, com per exemple "internal_data_search"."""
+Les teves respostes han de ser donades a partir de l'informació que tens a l'abast (dins d'aquest context). Si necessites informació fora d'aquest context, pots utilitzar les eines que tens al teu abast, com per exemple "internal_data_search".
+Pot ser que l'usuari es refereixi a misssatges que ha dit just abans d'iniciar aquesta conversa i que també anaven dirigits a tu, si és així, utilitza l'eina "get_current_datetime" per saber l'hora actual i després busca un missatge amb una hora similar (més gran que fa 1 minut)."""
         }
 
         self.function_handler = FunctionHandler()
@@ -103,13 +105,12 @@ Les teves respostes han de ser donades a partir de l'informació que tens a l'ab
         return self.name in text
     
     def _talk(self, text):
-        self.audio_player.tts_and_play_in_thread(text)
-        print("TALKING: ", text)
+        if verbose: print("TALKING: ", text)
+        self.audio_player.tts_and_play(text)
 
     def _conversate(self, metadated_text, speaker, confidential, mode="normal", temperature=.6):
-        print("conversate")
+        if verbose: print("CONVERSATING: ", metadated_text, speaker, confidential, mode)
         self.save_to_db(text=metadated_text["text"], speaker=speaker, inConversation=True, confidential=confidential)
-        print("storing initialitzed")
 
         self.is_interacting = True
         self.context_window.add_message({
@@ -125,7 +126,7 @@ Les teves respostes han de ser donades a partir de l'informació que tens a l'ab
         finish_reasons_to_continue = ["tool_calls", "function_call"]
 
         while not finish_reason or finish_reason in finish_reasons_to_continue:
-            print("conversation messages: ", self.context_window.get_messages())
+            if verbose: print("conversation messages: ", self.context_window.get_messages())
             response = self.client.chat.completions.create(
                 model="gpt-4o",
                 temperature=temperature,
@@ -136,17 +137,20 @@ Les teves respostes han de ser donades a partir de l'informació que tens a l'ab
             finish_reason = response.choices[0].finish_reason
 
             if finish_reason == None:
-                self.talk("No hi ha bona connexió a internet!")
+                self._talk("No hi ha bona connexió a internet!")
                 break
 
-            self.context_window.add_message(response.choices[0].message, usage=response.usage.completion_tokens)
+            res_message = response.choices[0].message
+
+            self.context_window.add_message(res_message, usage=response.usage.completion_tokens)
 
             if finish_reason == "tool_calls" or finish_reason == "function_call":
-                messages = self.function_handler.handle(response.choices[0].message)
+                messages = self.function_handler.handle(res_message)
                 for message in messages: self.context_window.add_message(message)
             
             elif finish_reason == "stop":
-                self._talk(response.choices[0].message.content)
+                self._talk(res_message.content)
+                self.save_to_db(res_message.content, speaker=self.name, inConversation=True, confidential=None)
 
 
         self.last_interaction = datetime.datetime.now()

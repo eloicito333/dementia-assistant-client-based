@@ -3,12 +3,9 @@ from typing import Optional
 import re
 import uuid
 
-import datetime
-from api_helper import api_helper
+from  program_settings import verbose
 from openai_client import OPENAI_CLIENT
 
-"""Ets una màquina que ha de cercar en el text contingut confidencial (números de compte bancari, números de targeta, etc.), substitueix-lo per un nom que el representi, posat entre <<nom clau>>. Llavors afegeix al diccionari una sortida ("confidential") el nom clau i el seu contingut com a valor. En el cas que no hi hagi contingut confidencial, deixa la clau "confidential" buida. Assegura't que el text que censuris sigui realment confidencal (normalment dades bancàries) sense preguntar a l'usuari i que el nom que li poses sigui descriptiu: NUMERO_TARGETA_BANCARIA, PIN_TARGETA_DE_CREDIT.
-        NO HAS DE RESPONDRE CAP MISSATGE, SIMPLEMENT FER LA TASCA QUE SE T'HA EXPLICAT"""
 
 class OutputFormat(BaseModel):
     corrected_text: str
@@ -16,8 +13,8 @@ class OutputFormat(BaseModel):
 
 class Handler:
     def __init__(self, assistant):
-        self.client = OPENAI_CLIENT
         self.assistant = assistant
+        self.client = OPENAI_CLIENT
         
         self.OutputFormat = OutputFormat
 
@@ -25,7 +22,7 @@ class Handler:
         text = cured_text_obj.corrected_text
         confidential = cured_text_obj.confidential
 
-        print("text: ", type(text), "confidential: ", type(confidential))
+        if verbose: print("text: ", type(text), "confidential: ", type(confidential))
         if not confidential: return cured_text_obj
 
         new_confidential= {}
@@ -52,12 +49,10 @@ class Handler:
         
         new_text = replace_placeholder(text, replace_fn)
 
-        var= OutputFormat(
+        return OutputFormat(
             corrected_text = new_text,
             confidential = new_confidential
         )
-        print(var)
-        return var
     
     def _eliminate_confidentiality(self, text, speaker, temperature=.6):
         system_prompt= """A continuació es mostraran uns missatges procedents de la veu enregistrada de l'usuari. En aquests missatges és possible que aparegui contingut confidencial (números de compte bancari, números de targeta, número de DNI, etc.).
@@ -90,7 +85,7 @@ Els missatges rebuts per dur a terme aquesta feina van dirigits a una tercera pe
         parsed: OutputFormat = result.choices[0].message.parsed
 
         new_parsed = self._convert_confidential_keys(parsed, speaker=speaker)
-        print(new_parsed)
+        if verbose: print("parsed confidential and curated_text obj: ", new_parsed)
         return new_parsed
     
     def handle(self, metadated_text, speaker): 
@@ -98,7 +93,7 @@ Els missatges rebuts per dur a terme aquesta feina van dirigits a una tercera pe
         if (not len(text)): return
 
         cured_text_obj = self._eliminate_confidentiality(text=text, speaker=speaker)
-
+    
         new_metadated_text = {
             "text": cured_text_obj.corrected_text,
             "tokens": metadated_text["tokens"]

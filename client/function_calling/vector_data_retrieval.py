@@ -3,13 +3,13 @@ from function_calling.function_parent_class import OpenAIFunction
 
 description = {
     "name": "internal_data_search",
-    "description": "search through all the things that have been said throughout all the conversations that the device has witnessed. Call this when you need context about things that have been said in the past outside the current conversation. At least one of the parameters must be specified.",
+    "description": "Search through all the things that have been said throughout all the conversations that the device has witnessed. Call this when you need context about things that have been said in the past outside the current conversation. At least one of the parameters must be specified.",
     "parameters": {
         "type": "object",
         "properties": {
             "text": {
                 "type": "string",
-                "description": "A question to be answered or a similar text to the one that you want to search for in the internal data. If not provided, the search will just be constrained by the other 2 parameters."
+                "description": "A question to be answered or a similar text to the one that you want to search for in the internal data. Ex: Which is somebody's favourite color? If not provided, the search will just be constrained by the other 2 parameters."
             },
             "date": {
                 "type": "object",

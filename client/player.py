@@ -1,109 +1,107 @@
-import sounddevice as sd
-import soundfile as sf
+import queue
 import tempfile
+import soundfile as sf
+import numpy as np
 import os
-import threading
+from threading import Thread
 
 from openai_client import OPENAI_CLIENT
-from essential_data import ASSISTANT_VOICE
+
+from  program_settings import verbose
+from stream_constants import SampleRate, BlockSize
 
 class AudioPlayer:
-    def __init__(self, voice=ASSISTANT_VOICE):
-        self.voice = voice
-
-        self.stream = None
-        self.playing = False
-        self.stop_flag = False
-
-        self.temp = None
-        self.file = None
+    def __init__(self):
 
         self.client = OPENAI_CLIENT
-    
-    def _new_temp_file(self):
-        #delete previous temp file
-        self._delete_temp_file()
 
-        #Create a temporary file to store audio data.
-        self.temp = tempfile.NamedTemporaryFile(prefix="player_", suffix=".mp3", delete=False)
+        self.stop_flag=False
+
+        self.output_queue=queue.Queue()
+        self.output_buffer=np.zeros((int(SampleRate * BlockSize / 1000), 1), dtype=np.float32)
+
+        self.temp = tempfile.NamedTemporaryFile(prefix="player_", suffix=".wav", delete=False)
+
+    def _restart_temp_file(self):
+        self.temp.close()
+
+        # Make sure to delete the temporary file when done
+        try:
+            os.remove(self.temp.name)
+        except Exception as e:
+            print(f"Could not delete temp file: {e}") 
+        finally:
+            self.temp=tempfile.NamedTemporaryFile(prefix="player_", suffix=".wav", delete=False)
 
 
-    def _delete_temp_file(self):
-        if self.file:
-            self.file.close()
-            self.file = None
-
-        if self.temp:
-            self.temp.close()
-
-            # Make sure to delete the temporary file when done
-            try:
-                os.remove(self.temp.name)
-            except Exception as e:
-                print(f"Could not delete temp file: {e}") 
-            finally:
-                self.temp=None
-
-    def tts_and_play(self, text, voice=None):
-        self.stop()
+    def _play(self, file_path):
+        self._stop()
         self.stop_flag = False
-        print("playing", self.stop_flag)
-        
-        self._new_temp_file()
+        blocksize=BlockSize
 
+        with sf.SoundFile(file_path, mode="r") as file:
+            for block in file.blocks(blocksize=blocksize, dtype="float32"):  # Read audio in chunks (frames)
+                if self.stop_flag:
+                    break  # Stop playback if stop flag is triggered
+
+                # Check the number of dimensions
+                if len(block.shape) == 1:
+                    # If 1D array, convert to 2D with one channel
+                    block = block.reshape(-1, 1)
+                elif len(block.shape) == 2:
+                    # If 2D array, ensure it has one column
+                    if block.shape[1] != 1:
+                        block = block[:, :1]
+                else:
+                    raise ValueError("Unexpected block shape: {}".format(block.shape))
+
+                # If block has fewer frames than expected, pad it with zeros
+                if block.shape[0] < blocksize:
+                    padding = np.zeros((blocksize - block.shape[0], block.shape[1]), dtype='float32')
+                    block = np.vstack((block, padding))  # Combine the block and padding
+
+                # Put reshaped block into queue
+                self.output_queue.put(block)
+
+        
+
+    def _stop(self):
+        self.stop_flag = True
+        #clearing the queue
+        with self.output_queue.mutex:
+            self.output_queue.queue.clear()
+        
+    def _tts_and_play(self, text, voice="alloy", speed=1):
+        self._stop()
+        self.stop_flag = False
+        self._restart_temp_file()
+
+        if verbose: print("generating audio...")
         response = self.client.audio.speech.create(
-        model="tts-1",
-        voice=voice or self.voice,
-        input=text
+            model="tts-1",
+            voice=voice,
+            input=text,
+            response_format="wav",
+            speed=speed
         )
 
         response.stream_to_file(self.temp.name)
-        if(self.stop_flag): return self._delete_temp_file()
 
-        self.play(self.temp.name)
+        if verbose: print("audio generated! PLAYING: ", self.temp.name)
 
-    def play(self, file_path):
-        self.stop_flag = False
-
-        print("playing", self.stop_flag)
-        #Play audio from file_path.
-        self.playing = True
-        #try:
-            # Open audio file with soundfile for real-time processing
-        self.file = sf.SoundFile(file_path, mode="r")
-
-        blocksize=1024
-        with sd.OutputStream(samplerate=self.file.samplerate, channels=self.file.channels, blocksize=blocksize) as self.stream:
-            for block in self.file.blocks(blocksize=blocksize):  # Read audio in chunks (frames)
-                if self.stop_flag:
-                    self.stop_flag = False
-                    break  # Stop playback if stop flag is triggered
-                    
-                #Ensure block is of type float32
-                if block.dtype != 'float32':
-                    block = block.astype('float32')
-                print(f"Block shape: {block.shape}, dtype: {block.dtype}")
-                self.stream.write(block)  # Play chunk of audio
-
-        """ except Exception as e:
-            print(f"Error during playback: {e}")
-        finally:
-            self.playing = False """
+        self._play(self.temp.name)
 
     def stop(self):
-        """Stop the currently playing audio."""
-        if self.stream:
-            self.stop_flag = True
-            self.stream.abort()  # Stop the stream immediately
-            self._delete_temp_file()  # Delete temporary file
-            print("Audio playback stopped.")
-
-    def tts_and_play_in_thread(self, text, voice=None, final_fn=lambda: None):
-        def thread_function():
-            self.tts_and_play(text, voice=voice)
-            final_fn()
-        
-        thread = threading.Thread(target=thread_function)
+        thread=Thread(name="AIAssistant_stop_playing", target=self._stop)
         thread.start()
+        return thread
+    
+    def play(self, file_path):
+        thread=Thread(name="AIAssistant_play_audio", target=self._play, args=(file_path,))
+        thread.start()
+        return thread
 
+    def tts_and_play(self, text, voice="nova", speed=1):
+        thread=Thread(name="AIAssistant_TTS_and_play", target=self._tts_and_play, args=(text, voice, speed))
+        thread.start()
         return thread

@@ -85,8 +85,8 @@ spokenDataRoutes.post("/search", async (req, res) => {
         'index': 'default',
         'path': 'embedding',
         'queryVector': embedding,
-        'numCandidates': 150,
-        'limit': 3,
+        'numCandidates': 250,
+        'limit': 7,
         'filter': filter
       }
     }
@@ -97,7 +97,7 @@ spokenDataRoutes.post("/search", async (req, res) => {
     }
   }
 
-  console.log(query)
+  console.log(JSON.stringify(query, null, 2))
 
   const result = await collection.aggregate(query).toArray()
 

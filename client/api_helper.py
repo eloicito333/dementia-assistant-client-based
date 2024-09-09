@@ -3,6 +3,7 @@ load_dotenv()
 
 import requests
 import os
+from  program_settings import verbose
 
 class SpokenDataDB:
     def __init__(self, url, headers):
@@ -10,7 +11,7 @@ class SpokenDataDB:
         self.headers = headers
     
     def post_document(self, document):
-        print(document)
+        if verbose: print("posting document to db: ", document)
         response = requests.post(self.url+"/spokenData/document", json=document, headers=self.headers)
         
         return response.json()

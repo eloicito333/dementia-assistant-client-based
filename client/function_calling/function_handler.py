@@ -1,18 +1,24 @@
-from function_calling.vector_data_retrieval import VectorDataRetrieval
-from function_calling.function_parent_class import OpenAIFunction
+from .vector_data_retrieval import VectorDataRetrieval
+from .get_current_datetime import GetCurerntDatetime
+from .function_parent_class import OpenAIFunction
+
+from openai.types.chat import ChatCompletionMessage, ChatCompletionToolParam
+
+from program_settings import verbose
 
 import json
 from threading import Thread
 
 class FunctionHandler:
     def __init__(self):
-        self.handler_array= [VectorDataRetrieval()]
+        self.handler_array= [VectorDataRetrieval(), GetCurerntDatetime()]
 
         self.handlers = dict(zip([handler.getName() for handler in self.handler_array], self.handler_array))
 
-        print(list(self.handlers.values()))
-        self.tools_array =  [self._description_to_tools(tool) for tool in self.handlers.values()] #map(list(self.handlers.values()), self._description_to_tools)
+        self.tools_array =  [self._description_to_tools(tool) for tool in self.handlers.values()] 
     
+        if verbose: print("Available tools: ", list(self.tools_array.keys()))
+
     def get_tools_array(self):
         return self.tools_array
 
@@ -22,14 +28,15 @@ class FunctionHandler:
                 "function": function.description
             }
     
-    def _handle_tool_call(self, index, tool_call, results):
-        result = self.handlers[tool_call["function"]["name"]].apply(json.loads(tool_call["function"]["arguments"]))
+    def _handle_tool_call(self, index, tool_call: ChatCompletionToolParam, results):
+        result = self.handlers[tool_call.function.name].apply(json.loads(tool_call.function.arguments))
         results[index] = result
         return result
 
     
-    def handle(self, message):
-        print("FUNCTION HANDLEING: ", message)
+    def handle(self, message: ChatCompletionMessage):
+        if verbose: print("FUNCTION HANDLEING: ", message.tool_calls)
+
         results = [None] * len(message.tool_calls)
         threads = []
 
@@ -47,6 +54,6 @@ class FunctionHandler:
             "tool_call_id": message.tool_calls[index].id
         } for index, result in enumerate(results)]
 
-        print(result_messages)
+        if verbose: print("function handling result: ", result_messages)
 
         return result_messages

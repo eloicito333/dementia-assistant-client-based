@@ -1,10 +1,11 @@
 from transcriber import Transcriber, transcriber_utils
-from recorder import Recorder
+from stream_handler import StreamHandler
 from handler import Handler
 from main_assistant import MainAssistant
 from player import AudioPlayer
 
 from essential_data import USER_GENDER, USER_NAME, ASSISTANT_NAME
+from  program_settings import verbose
 
 transcriber_options = {
     "language": "ca",
@@ -12,6 +13,12 @@ transcriber_options = {
 }
 
 def main():
+    print(f"\033[95m===DIGUES HOLA A {ASSISTANT_NAME}, EL TEU ASSISTENT DE VEU INTEL·LIGENT===\033[0m\n")
+    if verbose:
+        print("\033[93mVerbose Mode:\033[0m \033[92mON\033[0m\n")
+    else:
+        print("\033[93mVerbose Mode:\033[0m \033[91mOFF\033[0m\n")
+
     #initialize player
     audio_player = AudioPlayer()
 
@@ -25,7 +32,7 @@ def main():
     transcriber = Transcriber()
 
     # Initialize and start the Recorder
-    recorder = Recorder(transcriber=transcriber, transcriber_options=transcriber_options, result_handler=handler, audio_player=audio_player, verbose=True)
+    recorder = StreamHandler(transcriber=transcriber, transcriber_options=transcriber_options, result_handler=handler, audio_player=audio_player)
     recorder.start()
     
 

@@ -4,34 +4,24 @@ import queue
 import os
 import numpy as np
 import tempfile
-import threading
+from threading import Thread
 
 from transcriber import transcriber_utils
-from main_assistant import MainAssistant
+
+from  program_settings import verbose
 
 from essential_data import USER_GENDER, USER_NAME, ASSISTANT_NAME
+
+from stream_constants import Vocals, SampleRate, BlockSize, EndBlocks, FlushBlocks, ConnectionBlocks
 
 transcriber_options = {
     "language": "ca",
     "prompt": transcriber_utils.generate_prompt(user_name=USER_NAME, user_gender=USER_GENDER, assistant_name=ASSISTANT_NAME)
 }
 
-# Constants
-
-Vocals: list[int] = [50, 1000]  # Frequency range to detect sounds that could be speech
-
-SampleRate = 16000  # Stream device recording frequency per second
-BlockSize = 30  # Block size in milliseconds
-
-# 33 blocks = 1 second (aprox)
-EndBlocks = 50  # ~33x1,5 Number of blocks to wait before sending (30 ms is block)
-FlushBlocks = 33 * 25  # Number of blocks to wait before sending
-ConnectionBlocks = 33 * 5 # Number of blocks to start saving the audio data to a new buffer before sending in order to preserve context
-
 
 class AudioBuffer:
-    def __init__(self, number, audio_player):
-        self.audio_player = audio_player
+    def __init__(self, number):
         self.number = number
 
         self.buffer = queue.Queue()
@@ -42,23 +32,17 @@ class AudioBuffer:
         self.blocks_speaking = FlushBlocks
 
         self.context_prompt = None
-        self.continuation = False
-
-        print(self.temp.name)
-        
+        self.continuation = False        
 
     def save_to_file(self):
         for _ in range(0, self.buffer.qsize()):
             self.file.write(self.buffer.get())
-            print("|", end="", flush=True)
+            if verbose: print("|", end="", flush=True)
 
     
     def put(self, data):
         self.buffer.put(data)
         self.blocks_speaking -= 1
-
-        """ if FlushBlocks - self.blocks_speaking > 50: # 1,5 sec aprox.
-            self.audio_player.stop() """
     
     def get_file_content(self):
         self.save_to_file()
@@ -72,24 +56,26 @@ class AudioBuffer:
         self.file.close()
         self.temp.close()
         # Make sure to delete the temporary file when done
-        """ try:
+        try:
             os.remove(self.temp.name)
         except Exception as e:
-            print(f"Could not delete temp file: {e}") """
+            print(f"Could not delete temp file: {e}")
 
 
-class Recorder:
-    def __init__(self, transcriber, transcriber_options, result_handler, audio_player, threshold=0.01, input_device=None, verbose=False):
-        self.audio_player = audio_player
+class StreamHandler:
+    def __init__(self, transcriber, transcriber_options, result_handler, audio_player, threshold=0.01, input_device=None, output_device=None, contaminated_streams=False):
+        self.contaminated_streams = contaminated_streams
 
         self.transcriber = transcriber
         self.threshold = threshold
-        self.verbose = verbose
         self.input_device = input_device
+        self.output_device=output_device
+
+        self.audio_player = audio_player
         
         self.running = True
         self.waiting = 0
-        self.buffers = [AudioBuffer(number=0, audio_player=self.audio_player), AudioBuffer(number=1, audio_player=self.audio_player)]
+        self.buffers = [AudioBuffer(number=0), AudioBuffer(number=1), AudioBuffer(number=2)]
         self.buffer_counter = 2
         self.speaking = False
         self.blocks_speaking = 0
@@ -110,7 +96,7 @@ class Recorder:
         poped_buffer=self.buffers.pop(number)
 
         #creating new buffer on index 1
-        self.buffers.append(AudioBuffer(number=self.buffer_counter, audio_player=self.audio_player))
+        self.buffers.append(AudioBuffer(number=self.buffer_counter))
         self.buffer_counter+=1
 
         return poped_buffer
@@ -137,18 +123,33 @@ class Recorder:
         if self.buffers[0].blocks_speaking < 1:
             self._save_to_process(continuation=True)
 
-            
-    def callback(self, indata, frames, _time, status):
+    def callback(self, indata, outdata, frames, _time, status):
+
+        # Omplir outdata amb l'àudio que es vol reproduir
+        try:
+            data = self.audio_player.output_queue.get_nowait()
+            outdata[:] = data
+            # Actualitzar audio_player.output_buffer per a cancel·lació
+            self.audio_player.output_buffer[:frames, :] = data
+
+        except queue.Empty:
+            outdata.fill(0)
+            self.audio_player.output_buffer.fill(0)
+
         if not any(indata):
             return
         
+        if self.contaminated_streams:
+            # Restar l'àudio de sortida de l'entrada per cancel·lar l'eco
+            indata = indata - self.audio_player.output_buffer[:frames, :]
+
         voice = self._is_there_voice(indata, frames)
 
         if not voice and not self.speaking:
             return
         
         if voice:  # User speaking
-            if self.verbose:
+            if verbose:
                 print(".", end="", flush=True)
 
             self._save_to_buffer(indata)
@@ -162,7 +163,7 @@ class Recorder:
                 self.speaking = False
                 return
             else:
-                if self.verbose:
+                if verbose:
                     print("-", end="", flush=True)
                 
                 self._save_to_buffer(indata)
@@ -171,7 +172,7 @@ class Recorder:
         if len(self.buffers_to_process) > 0:
             buffer: AudioBuffer = self.buffers_to_process.pop(0)
             file = buffer.get_file_content()
-            if self.verbose:
+            if verbose:
                 print("\n\033[90mTranscribing..\033[0m")
 
             #generating correct transcription prompt
@@ -189,11 +190,11 @@ class Recorder:
             buffer.terminate()
 
             if not buffer.continuation:
-                if self.verbose: print(f"\033[1A\033[2K\033[0G{result}")
+                if verbose: print(f"\033[1A\033[2K\033[0G{result}")
                 else:
                     print("")
             
-                self.result_handler.handle(result, speaker=USER_NAME.split(" ")[0])
+                self.result_handler.handle(result, speaker=USER_NAME)
             elif buffer.number + 1 == self.buffers[0].number:
 
                 #split the string in the best way possible in order for it to be between 5 and 30 characters
@@ -206,18 +207,23 @@ class Recorder:
                 self.buffers[0].context_prompt = context
 
     def listen(self):
-        show_device = (
-            self.input_device if self.input_device is not None else sd.default.device[0]
-        )
-        print(
-            f"\033[32mLive stream device: \033[37m{sd.query_devices(device=show_device)['name']}\033[0m"
-        )
+        # Get the default input and output devices
+        input_device = sd.default.device[0] if sd.default.device[0] is not None else None
+        output_device = sd.default.device[1] if sd.default.device[1] is not None else None
+
+        # If you have specific devices set, use them; otherwise, use defaults
+        show_input_device = input_device if input_device is not None else sd.default.device[0]
+        show_output_device = output_device if output_device is not None else sd.default.device[1]
+
+        # Print device information
+        print(f"\033[32mLive input device: \033[37m{sd.query_devices(device=show_input_device)['name']}\033[0m")
+        print(f"\033[32mLive output device: \033[37m{sd.query_devices(device=show_output_device)['name']}\033[0m")
         print("\033[32mListening.. \033[37m(Ctrl+C to Quit)\033[0m")
 
-        with sd.InputStream(
+        with sd.Stream(
             channels=1,
             callback=self.callback,
-            blocksize=int(SampleRate * BlockSize / 1000),
+            blocksize=BlockSize,
             samplerate=SampleRate,
             device=self.input_device,
         ):
@@ -225,7 +231,7 @@ class Recorder:
                 for buffer in self.buffers:
                     buffer.save_to_file()
                 
-                if len(self.buffers_to_process) > 0: threading.Thread(target=self.process, name="AIAssistant_processing_audio").start()
+                Thread(target=self.process, name="AIAssistant_processing_audio").start()
 
     def start(self):
         try:
