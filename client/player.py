@@ -7,7 +7,7 @@ from threading import Thread
 
 from openai_client import OPENAI_CLIENT
 
-from  program_settings import verbose
+from  program_settings import verbose, no_delete
 from stream_constants import SampleRate, BlockSize
 
 class AudioPlayer:
@@ -22,16 +22,19 @@ class AudioPlayer:
 
         self.temp = tempfile.NamedTemporaryFile(prefix="player_", suffix=".wav", delete=False)
 
+        if no_delete: print("\nNew player temp file: ", self.temp.name)
+
     def _restart_temp_file(self):
         self.temp.close()
 
         # Make sure to delete the temporary file when done
         try:
-            os.remove(self.temp.name)
+            if not no_delete: os.remove(self.temp.name)
         except Exception as e:
             print(f"Could not delete temp file: {e}") 
         finally:
             self.temp=tempfile.NamedTemporaryFile(prefix="player_", suffix=".wav", delete=False)
+            if no_delete: print("\nNew player temp file: ", self.temp.name)
 
 
     def _play(self, file_path):

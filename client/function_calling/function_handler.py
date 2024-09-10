@@ -17,7 +17,7 @@ class FunctionHandler:
 
         self.tools_array =  [self._description_to_tools(tool) for tool in self.handlers.values()] 
     
-        if verbose: print("Available tools: ", list(self.tools_array.keys()))
+        if verbose: print("Available tools: ", list(self.handlers.keys()), "\n")
 
     def get_tools_array(self):
         return self.tools_array

@@ -8,7 +8,7 @@ from threading import Thread
 
 from transcriber import transcriber_utils
 
-from  program_settings import verbose
+from  program_settings import verbose, no_delete
 
 from essential_data import USER_GENDER, USER_NAME, ASSISTANT_NAME
 
@@ -32,7 +32,9 @@ class AudioBuffer:
         self.blocks_speaking = FlushBlocks
 
         self.context_prompt = None
-        self.continuation = False        
+        self.continuation = False
+
+        if no_delete: print("\nNew audio buffer file: ", self.temp.name)
 
     def save_to_file(self):
         for _ in range(0, self.buffer.qsize()):
@@ -57,7 +59,7 @@ class AudioBuffer:
         self.temp.close()
         # Make sure to delete the temporary file when done
         try:
-            os.remove(self.temp.name)
+            if not no_delete: os.remove(self.temp.name)
         except Exception as e:
             print(f"Could not delete temp file: {e}")
 
